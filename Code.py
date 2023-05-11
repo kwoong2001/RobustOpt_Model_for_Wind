@@ -18,17 +18,21 @@ Expected_P_UR = wb1.Sheets("Expected_P_UR")    # Expected deployed power in up r
 Expected_P_DR = wb1.Sheets("Expected_P_DR")    # Expected deployed power in down regulation services
 Expected_P_RT_WPR = wb1.Sheets("Expected_P_RT_WPR")  # Expected wind power realization
 
+#variation interval은?
+
 ### 파라미터 설정
 time_dim = 24     # 시간 개수 (t)
-min_dim = 12      # 5분 x 12 = 1시간 (j)
+min_dim = 12      # ex) 5분 x 12 = 1시간 (j)
+del_S = 1/min_dim # Duration of intra-hourly interval ex) 5min = 1/12(h)
 BESS_dim = 2      # BESS 개수 (s)
 WPR_dim = 1       # 풍력발전기 개수 (w)
 Marginal_cost_CH = 1    # Marginal cost of BES in charging modes
 Marginal_cost_DCH = 1   # Marginal cost of BES in discharging modes
 Marginal_cost_WPR = 3   # Marginal cost of WPR
-Ramp_rate_WPR = 3       # Ramp-rate of WPR
-E_min_BESS = 0    # Minimum energy of BESS
-E_max_BESS = 30   # Maximum energy of BESS
+Ramp_rate_WPR = 3       # Ramp-rate of WPR (MW)
+Initial_BESS = 15   # Initial energy of BESS (MWh)
+E_min_BESS = 0    # Minimum energy of BESS (MWh)
+E_max_BESS = 30   # Maximum energy of BESS (MWh)
 
 ### 최적화 파트
 def build_optimization_model(name='Robust_Optimization_Model'):
@@ -41,6 +45,7 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     time_n_WPR = [(t,j,w) for t in range(1,time_dim + 1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1)]     # (t,j,w)의 three dimension
 
     ### Continous Variable 지정 (연속 변수, 실수 변수)
+    #Day-ahead
     P_DA_S = mdl.continuous_var_dict(time, lb=0, ub=inf, name="P-DA-S")   # Selling bids in the day-ahead market
     P_DA_B = mdl.continuous_var_dict(time, lb=0, ub=inf, name="P-DA-B")   # Buying bids in the day-ahead market
     P_RS = mdl.continuous_var_dict(time, lb=0, ub=inf, name="P-RS")       # Reserve bid 
@@ -64,16 +69,18 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     P_RS_DCH = mdl.continuous_var_dict(time_n_BESS, lb=0, ub=inf, name="P-RS-DCH")    # Reserve scheduling of BES in discharging modes
     P_RS_WPR = mdl.continuous_var_dict(time_n_WPR, lb=0, ub=inf, name="P-RS-WPR")     # Reserve scheduling of WPR
 
-    # P_SP_WPR = mdl.continuous_var_dict(time_n_WPR, lb=0, ub=inf, name="P-SP-WPR")            # Spilled power of WPR (difference between the realization of wind power and the scheduled power of WPR)
+    #Real-time
+    P_SP_WPR = mdl.continuous_var_dict(time_n_WPR, lb=0, ub=inf, name="P-SP-WPR")            # Spilled power of WPR (difference between the realization of wind power and the scheduled power of WPR)
     Energy_BESS = mdl.continuous_var_dict(time_n_BESS, lb=0, ub=E_max_BESS, name="Energy-BESS")  # Energy level of BES 
     P_RT_WPR = mdl.continuous_var_dict(time_n_WPR, lb=0, ub=inf, name="P-RT-WPR")                # Realization of wind power in real-time
 
-    # AV_WPR = mdl.continuous_var_dict(time_n_WPR, lb=0, ub=inf, name="AV-WPR")                    # Auxiliary variables for linearization
-    AV_RO = mdl.continuous_var_dict(time_min, lb=0, ub=inf, name="AV-RO")                          # Auxiliary variable of RO
+    AV_WPR = mdl.continuous_var_dict(time_n_WPR, lb=0, ub=inf, name="AV-WPR")                    # Auxiliary variables for linearization
     
-    # Auxiliary variable of RO
-    B_t = mdl.continuous_var_dict(time, lb=0, ub=inf, name="B-t")          # Income of owner
-    C_t = mdl.continuous_var_dict(time, lb=0, ub=inf, name="C-t")          # Cost of owner
+    
+    ### Functions
+    AV_RO = mdl.continuous_var_dict(time, lb=0, ub=inf, name="AV-RO")                        # Auxiliary variable of RO
+    B_t = mdl.continuous_var_dict(time, lb=0, ub=inf, name="B-t")          # Income function of owner
+    C_t = mdl.continuous_var_dict(time, lb=0, ub=inf, name="C-t")          # Cost function of owner
 
     ### Binary Variable 지정 (이진 변수)
     D_Char = mdl.binary_var_dict(time_n_BESS, name="D-Char")      # Charging binary variables of BES (알파)
@@ -85,19 +92,20 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     #                       - Marginal_cost_DCH * P_DA_DCH[(t,j,s)] - Marginal_cost_CH * P_DA_CH[(t,j,s)] - Marginal_cost_WPR * P_DA_WPR[(t,j,w)] + AV_RO[(t,j)]
     #                       for t in range(1,time_dim+1) for j in range(1,min_dim+1) for s in range(1,BESS_dim+1) for w in range(1,WPR_dim+1)))
     
-    mdl.maximize(mdl.sum(Price_DA.Cells(t+1,2).Value * (P_DA_DCH[(t,j,s)] - P_DA_CH[(t,j,s)] + P_DA_WPR[(t,j,w)]) + Price_RS.Cells(t+1,2).Value * (P_RS_CH[(t,j,s)] + P_RS_DCH[(t,j,s)] + P_RS_WPR[(t,j,w)])
-                         - Marginal_cost_DCH * P_DA_DCH[(t,j,s)] - Marginal_cost_CH * P_DA_CH[(t,j,s)] - Marginal_cost_WPR * P_DA_WPR[(t,j,w)]
-                         + AV_RO[(t,j)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for s in range(1,BESS_dim+1) for w in range(1,WPR_dim+1))) 
+    mdl.maximize(mdl.sum(Price_DA.Cells(t+1,2).Value * mdl.sum(del_S * ((mdl.sum(P_DA_DCH[(t,j,s)] - P_DA_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_DA_WPR[(t,j,w)] for w in range(1,WPR_dim+1)))) for j in range(1,min_dim+1))
+                         + Price_RS.Cells(t+1,2).Value * mdl.sum(del_S * ((mdl.sum(P_RS_CH[(t,j,s)] + P_RS_DCH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_RS_WPR[(t,j,w)] for w in range(1,WPR_dim+1)))) for j in range(1,min_dim+1))
+                         - mdl.sum(del_S* (mdl.sum(Marginal_cost_DCH * P_DA_DCH[(t,j,s)] + Marginal_cost_CH * P_DA_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(Marginal_cost_WPR * P_DA_WPR[(t,j,w)] for w in range(1,WPR_dim+1))) for j in range(1,min_dim+1))
+                         + AV_RO[t] for t in range(1,time_dim+1)))
 
     # Robust Optizimation을 위한 변수 (BESS + WPR) - 식(65)
-    mdl.add_constraints(AV_RO[(t,j)] <= mdl.sum(Price_UR.Cells(t+1,j+1).Value * (P_UR_DCH[(t,j,s)] + P_UR_CH[(t,j,s)] + P_UR_WPR[(t,j,w)]) 
-                                                 + Price_DR.Cells(t+1,j+1).Value * (P_DR_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] + P_DR_WPR[(t,j,w)])
-                                                 - Marginal_cost_DCH * P_UR_DCH[(t,j,s)] - Marginal_cost_CH * P_DR_CH[(t,j,s)] - Marginal_cost_WPR * P_UR_WPR[(t,j,w)] 
-                                                 for s in range(1,BESS_dim+1) for w in range(1,WPR_dim+1)) for t in range(1,time_dim+1) for j in range(1,min_dim+1))
+    mdl.add_constraints(AV_RO[t] <= mdl.sum(del_S * (Price_UR.Cells(t+1,j+1).Value * (mdl.sum(P_UR_DCH[(t,j,s)] + P_UR_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_UR_WPR[(t,j,w)] for w in range(1,WPR_dim+1))) 
+                                                 + Price_DR.Cells(t+1,j+1).Value * (mdl.sum(P_DR_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_DR_WPR[(t,j,w)] for w in range(1,WPR_dim+1)))
+                                                 - mdl.sum(Marginal_cost_DCH * P_UR_DCH[(t,j,s)] - Marginal_cost_CH * P_DR_CH[(t,j,s)] for s in range(1,BESS_dim+1)) - mdl.sum(Marginal_cost_WPR * P_UR_WPR[(t,j,w)] for w in range(1,WPR_dim+1)) 
+                                                  ) for j in range(1,min_dim+1)) for t in range(1,time_dim+1))
     
     ### B_t - 식(2)
-    mdl.add_constraints(B_t[t] == mdl.sum((Price_DA.Cells(t+1,2).Value * P_DA_S[t] - Price_DA.Cells(t+1,2).Value * P_DA_B[t] + Price_RS.Cells(t+1,2).Value * P_RS[t])
-                                          + (Price_UR.Cells(t+1,j+1).Value * P_UR[(t,j)] + Price_DR.Cells(t+1,j+1).Value * P_DR[(t,j)]) for j in range(1,min_dim+1)) for t in range(1,time_dim+1))  # Income of owner
+    mdl.add_constraints(B_t[t] == (Price_DA.Cells(t+1,2).Value * P_DA_S[t] - Price_DA.Cells(t+1,2).Value * P_DA_B[t] + Price_RS.Cells(t+1,2).Value * P_RS[t])
+                                          + mdl.sum(del_S*(Price_UR.Cells(t+1,j+1).Value * P_UR[(t,j)] + Price_DR.Cells(t+1,j+1).Value * P_DR[(t,j)]) for j in range(1,min_dim+1)) for t in range(1,time_dim+1))  # Income of owner
 
      ### C_t - 식(3)
     mdl.add_constraints(C_t[t] == mdl.sum(Marginal_cost_DCH * (P_DA_DCH[(t,j,s)] + P_UR_DCH[(t,j,s)] - P_DR_DCH[(t,j,s)]) + Marginal_cost_CH * (P_DA_CH[(t,j,s)] + P_DR_CH[(t,j,s)] - P_UR_CH[(t,j,s)]) 
@@ -132,7 +140,7 @@ def build_optimization_model(name='Robust_Optimization_Model'):
 
     mdl.add_constraints(P_DR[(t,j)] <= P_RS[t] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식(16)
     
-    ### Constarints of stored energy of BES - 식(17) ~ 식(19)
+    ### Constarints of stored energy of BES - 식(17) ~ 식(19) # 조건 다시 체크해볼것
     for t in range(1,time_dim+1):
         for j in range(1,min_dim+1):
             for s in range(1,BESS_dim+1):
@@ -147,7 +155,7 @@ def build_optimization_model(name='Robust_Optimization_Model'):
                     mdl.add_constraint(Energy_BESS[(t,j,s)] == 15)
                 
                 else:
-                    mdl.add_constraint(Energy_BESS[(t,j,s)] == Energy_BESS[(t,j-1,s)] + P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] - P_UR_DCH[(t,j,s)])    
+                    mdl.add_constraint(Energy_BESS[(t,j,s)] == Energy_BESS[(t,j-1,s)] + del_S*(P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] - P_UR_DCH[(t,j,s)]))    
                         
     ### Constarints of capacity - 식(20) ~ 식(38)
     # Power capacity of BES in day-ahead planning - 식(20) ~ 식(25) + 식(30) ~ 식(31)
