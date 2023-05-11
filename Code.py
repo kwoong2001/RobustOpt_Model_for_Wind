@@ -10,10 +10,10 @@ import os
 excel = win32.Dispatch("Excel.Application")
 wb1 = excel.Workbooks.Open(os.getcwd()+"\\Data\\robust model_data.xlsx")
 Price_DA = wb1.Sheets("Price_DA")              # Day-ahead price
-Price_RS = wb1.Sheets("Price_RS")              # Reserve price
+Price_RS = wb1.Sheets("Price_RS")              # Reserve prices
 Price_UR = wb1.Sheets("Price_UR")              # Up regulation prices
 Price_DR = wb1.Sheets("Price_DR")              # Down regulation prices
-Ramp_rate_BESS = wb1.Sheets("Ramp_rate_BESS")  # Ramp-rate of BES
+Ramp_rate_BESS = wb1.Sheets("Ramp_rate_BESS")  # Ramp-rate of BESS
 Expected_P_UR = wb1.Sheets("Expected_P_UR")    # Expected deployed power in up regulation services
 Expected_P_DR = wb1.Sheets("Expected_P_DR")    # Expected deployed power in down regulation services
 Expected_P_RT_WPR = wb1.Sheets("Expected_P_RT_WPR")  # Expected wind power realization
