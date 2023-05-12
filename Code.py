@@ -88,9 +88,6 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     D_WPR = mdl.binary_var_dict(time_n_WPR, name="D-WPR")         # Commitment status binary variable of WPR
     
     ### Objective function - 식(1) / 식(65)
-    # mdl.maximize(mdl.sum(Price_DA.Cells(t+1,2).Value * P_DA_S[t] - Price_DA.Cells(t+1,2).Value * P_DA_B[t] + Price_RS.Cells(t+1,2).Value * P_RS[t]  
-    #                       - Marginal_cost_DCH * P_DA_DCH[(t,j,s)] - Marginal_cost_CH * P_DA_CH[(t,j,s)] - Marginal_cost_WPR * P_DA_WPR[(t,j,w)] + AV_RO[(t,j)]
-    #                       for t in range(1,time_dim+1) for j in range(1,min_dim+1) for s in range(1,BESS_dim+1) for w in range(1,WPR_dim+1)))
     
     mdl.maximize(mdl.sum(Price_DA.Cells(t+1,2).Value * mdl.sum(del_S * ((mdl.sum(P_DA_DCH[(t,j,s)] - P_DA_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_DA_WPR[(t,j,w)] for w in range(1,WPR_dim+1)))) for j in range(1,min_dim+1))
                          + Price_RS.Cells(t+1,2).Value * mdl.sum(del_S * ((mdl.sum(P_RS_CH[(t,j,s)] + P_RS_DCH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_RS_WPR[(t,j,w)] for w in range(1,WPR_dim+1)))) for j in range(1,min_dim+1))
@@ -108,32 +105,38 @@ def build_optimization_model(name='Robust_Optimization_Model'):
                                           + mdl.sum(del_S*(Price_UR.Cells(t+1,j+1).Value * P_UR[(t,j)] + Price_DR.Cells(t+1,j+1).Value * P_DR[(t,j)]) for j in range(1,min_dim+1)) for t in range(1,time_dim+1))  # Income of owner
 
      ### C_t - 식(3)
-    mdl.add_constraints(C_t[t] == mdl.sum(Marginal_cost_DCH * (P_DA_DCH[(t,j,s)] + P_UR_DCH[(t,j,s)] - P_DR_DCH[(t,j,s)]) + Marginal_cost_CH * (P_DA_CH[(t,j,s)] + P_DR_CH[(t,j,s)] - P_UR_CH[(t,j,s)]) 
-                                          + Marginal_cost_WPR * (P_DA_WPR[(t,j,w)] + P_UR_WPR[(t,j,w)] - P_DR_WPR[(t,j,w)]) for j in range(1,min_dim+1) for s in range(1,BESS_dim+1) for w in range(1,WPR_dim+1)) for t in range(1,time_dim+1))  # Cost of owner
+    mdl.add_constraints(C_t[t] == mdl.sum( del_S * mdl.sum((Marginal_cost_DCH * P_DA_DCH[(t,j,s)] + Marginal_cost_CH * P_DA_CH[(t,j,s)])  for s in range(1,BESS_dim + 1)) + mdl.sum( Marginal_cost_WPR * P_DA_WPR[(t,j,w)] for w in range(1,WPR_dim+1)) for j in range(1,min_dim+1)) 
+                        + mdl.sum( del_S * mdl.sum((Marginal_cost_DCH * (P_UR_DCH[(t,j,s)] - P_DR_DCH[(t,j,s)]) + Marginal_cost_CH * (P_UR_CH[(t,j,s)] - P_DR_CH[(t,j,s)]))  for s in range(1,BESS_dim + 1)) + mdl.sum( Marginal_cost_WPR * (P_UR_WPR[(t,j,w)] - P_DR_WPR[(t,j,w)]) for w in range(1,WPR_dim+1)) for j in range(1,min_dim+1))
+                        for t in range(1,time_dim+1))
     
     ### Equality constraints - 식(4) ~ 식(6) + 식(12) ~ 식(14)
+    #Day-ahead bid 식(4)~식(6)
     mdl.add_constraints(P_DA_DCH[(t,j,s)] == P_DA_DCH[(t,J,s)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for J in range(1,min_dim+1) for s in range(1,BESS_dim+1))  # 식(4)
 
     mdl.add_constraints(P_DA_CH[(t,j,s)] == P_DA_CH[(t,J,s)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for J in range(1,min_dim+1) for s in range(1,BESS_dim+1))    # 식(5)
 
     mdl.add_constraints(P_DA_WPR[(t,j,w)] == P_DA_WPR[(t,J,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for J in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(6
 
+    #Reserve bid 식(12)~식(14)
     mdl.add_constraints(P_RS_CH[(t,j,s)] == P_RS_CH[(t,J,s)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for J in range(1,min_dim+1) for s in range(1,BESS_dim+1))    # 식(12)   
 
     mdl.add_constraints(P_RS_DCH[(t,j,s)] == P_RS_DCH[(t,J,s)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for J in range(1,min_dim+1) for s in range(1,BESS_dim+1))  # 식(13)                                           
 
     mdl.add_constraints(P_RS_WPR[(t,j,w)] == P_RS_WPR[(t,J,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for J in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(14)
 
-    ### Constraints of day-ahead energy / reserve bids / real-time deployed power in the up and down regulation services - 식(7) ~ 식(11)          
-    mdl.add_constraints(P_DA_S[t] == mdl.sum(P_DA_DCH[(t,j,s)] + P_DA_WPR[(t,j,w)] for j in range(1,min_dim+1) for s in range(1,BESS_dim+1) for w in range(1,WPR_dim+1)) for t in range(1,time_dim+1))  # 식(7)
-
-    mdl.add_constraints(P_DA_B[t] == mdl.sum(P_DA_CH[(t,j,s)] for j in range(1,min_dim+1) for s in range(1,BESS_dim+1)) for t in range(1,time_dim+1))  # 식(8)
+    ### Constraints of day-ahead energy / reserve bids / real-time deployed power in the up and down regulation services - 식(7) ~ 식(11), 
     
-    mdl.add_constraints(P_RS[t] == mdl.sum(P_RS_CH[(t,j,s)] + P_RS_DCH[(t,j,s)] + P_RS_WPR[(t,j,w)] for j in range(1,min_dim+1) for s in range(1,BESS_dim+1) for w in range(1,WPR_dim+1)) for t in range(1,time_dim+1))  # 식(9)
-    
-    mdl.add_constraints(P_UR[(t,j)] == mdl.sum(P_UR_DCH[(t,j,s)] + P_UR_CH[(t,j,s)] + P_UR_WPR[(t,j,w)] for s in range(1,BESS_dim+1) for w in range(1,WPR_dim+1)) for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식(10)
+    #식(7)-(9)는 논문이 틀림
+    mdl.add_constraints(P_DA_S[t] == del_S * mdl.sum(mdl.sum(P_DA_DCH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum( P_DA_WPR[(t,j,w)]  for w in range(1,WPR_dim+1) ) for j in range(1,min_dim+1)) for t in range(1,time_dim+1))  # 식(7)
 
-    mdl.add_constraints(P_DR[(t,j)] == mdl.sum(P_DR_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] + P_DR_WPR[(t,j,w)] for s in range(1,BESS_dim+1) for w in range(1,WPR_dim+1)) for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식(11)
+    mdl.add_constraints(P_DA_B[t] == del_S * mdl.sum(P_DA_CH[(t,j,s)] for j in range(1,min_dim+1) for s in range(1,BESS_dim+1)) for t in range(1,time_dim+1))  # 식(8)
+    
+    mdl.add_constraints(P_RS[t] == del_S * mdl.sum(mdl.sum(P_RS_CH[(t,j,s)] + P_RS_DCH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_RS_WPR[(t,j,w)] for w in range(1,WPR_dim+1)) for j in range(1,min_dim+1)) for t in range(1,time_dim+1))  # 식(9)
+    
+    #식(10)-(11)은 동일
+    mdl.add_constraints(P_UR[(t,j)] == mdl.sum(mdl.sum(P_UR_DCH[(t,j,s)] + P_UR_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_UR_WPR[(t,j,w)] for w in range(1,WPR_dim+1))) for j in range(1,min_dim+1) for t in range(1,time_dim+1))  # 식(10)
+
+    mdl.add_constraints(P_DR[(t,j)] == mdl.sum(mdl.sum(P_DR_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_DR_WPR[(t,j,w)] for w in range(1,WPR_dim+1))) for j in range(1,min_dim+1) for t in range(1,time_dim+1))  # 식(11)
 
     ### 식(15) ~ 식(16)
     mdl.add_constraints(P_UR[(t,j)] <= P_RS[t] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식(15)
