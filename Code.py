@@ -73,7 +73,8 @@ def build_optimization_model(name='Robust_Optimization_Model'):
 
     #Real-time
     P_SP_WPR = mdl.continuous_var_dict(time_n_WPR, lb=0, ub=inf, name="P-SP-WPR")            # Spilled power of WPR (difference between the realization of wind power and the scheduled power of WPR)
-    Energy_BESS = mdl.continuous_var_dict(time_n_BESS, lb=0, ub=inf, name="Energy-BESS")  # Energy level of BES 
+    E_BESS_DA = mdl.continuous_var_dict(time_n_BESS, lb=0, ub=inf, name="E-BESS-DA")        # Energy level of BES in Day-ahead
+    E_BESS_RT = mdl.continuous_var_dict(time_n_BESS, lb=0, ub=inf, name="E-BESS-RT")        # Energy level of BES in Real-time
     P_RT_WPR = mdl.continuous_var_dict(time_n_WPR, lb=0, ub=inf, name="P-RT-WPR")                # Realization of wind power in real-time
 
     AV_WPR = mdl.continuous_var_dict(time_n_WPR, lb=0, ub=inf, name="AV-WPR")                    # Auxiliary variables for linearization
@@ -103,13 +104,14 @@ def build_optimization_model(name='Robust_Optimization_Model'):
                                             for j in range(1,min_dim+1)) for t in range(1,time_dim+1))
     
     ### B_t - 식(2)
-    mdl.add_constraints(B_t[t] == (Price_DA.Cells(t+1,2).Value * P_DA_S[t] - Price_DA.Cells(t+1,2).Value * P_DA_B[t] + Price_RS.Cells(t+1,2).Value * P_RS[t])
-                                          + mdl.sum(del_S*(Price_UR.Cells(t+1,j+1).Value * P_UR[(t,j)] + Price_DR.Cells(t+1,j+1).Value * P_DR[(t,j)]) for j in range(1,min_dim+1)) for t in range(1,time_dim+1))  # Income of owner
+    #mdl.add_constraints(B_t[t] == (Price_DA.Cells(t+1,2).Value * P_DA_S[t] - Price_DA.Cells(t+1,2).Value * P_DA_B[t] + Price_RS.Cells(t+1,2).Value * P_RS[t])
+    #                                      + mdl.sum(del_S*(Price_UR.Cells(t+1,j+1).Value * P_UR[(t,j)] + Price_DR.Cells(t+1,j+1).Value * P_DR[(t,j)]) for j in range(1,min_dim+1)) for t in range(1,time_dim+1))  # Income of owner
+    
 
      ### C_t - 식(3)
-    mdl.add_constraints(C_t[t] == mdl.sum( del_S * mdl.sum((Marginal_cost_DCH * P_DA_DCH[(t,j,s)] + Marginal_cost_CH * P_DA_CH[(t,j,s)])  for s in range(1,BESS_dim + 1)) + mdl.sum( Marginal_cost_WPR * P_DA_WPR[(t,j,w)] for w in range(1,WPR_dim+1)) for j in range(1,min_dim+1)) 
-                        + mdl.sum( del_S * mdl.sum((Marginal_cost_DCH * (P_UR_DCH[(t,j,s)] - P_DR_DCH[(t,j,s)]) + Marginal_cost_CH * (P_UR_CH[(t,j,s)] - P_DR_CH[(t,j,s)]))  for s in range(1,BESS_dim + 1)) + mdl.sum( Marginal_cost_WPR * (P_UR_WPR[(t,j,w)] - P_DR_WPR[(t,j,w)]) for w in range(1,WPR_dim+1)) for j in range(1,min_dim+1))
-                        for t in range(1,time_dim+1))
+    #mdl.add_constraints(C_t[t] == mdl.sum( del_S * mdl.sum((Marginal_cost_DCH * P_DA_DCH[(t,j,s)] + Marginal_cost_CH * P_DA_CH[(t,j,s)])  for s in range(1,BESS_dim + 1)) + mdl.sum( Marginal_cost_WPR * P_DA_WPR[(t,j,w)] for w in range(1,WPR_dim+1)) for j in range(1,min_dim+1)) 
+    #                    + mdl.sum( del_S * mdl.sum((Marginal_cost_DCH * (P_UR_DCH[(t,j,s)] - P_DR_DCH[(t,j,s)]) + Marginal_cost_CH * (P_UR_CH[(t,j,s)] - P_DR_CH[(t,j,s)]))  for s in range(1,BESS_dim + 1)) + mdl.sum( Marginal_cost_WPR * (P_UR_WPR[(t,j,w)] - P_DR_WPR[(t,j,w)]) for w in range(1,WPR_dim+1)) for j in range(1,min_dim+1))
+    #                    for t in range(1,time_dim+1))
     
     ### Equality constraints - 식(4) ~ 식(6) + 식(12) ~ 식(14)
     #Day-ahead bid 식(4)~식(6)
@@ -141,24 +143,41 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     mdl.add_constraints(P_DR[(t,j)] == mdl.sum(mdl.sum(P_DR_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_DR_WPR[(t,j,w)] for w in range(1,WPR_dim+1))) for j in range(1,min_dim+1) for t in range(1,time_dim+1))  # 식(11)
 
     ### 식(15) ~ 식(16)
-    mdl.add_constraints(P_UR[(t,j)] + P_DR[(t,j)] <= P_RS[t] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식(15)
+    #mdl.add_constraints(P_UR[(t,j)] + P_DR[(t,j)] <= P_RS[t] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식(15)
 
-    #mdl.add_constraints(P_UR[(t,j)] <= P_RS[t] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식(15)
-    #mdl.add_constraints(P_DR[(t,j)] <= P_RS[t] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식(16)
+    mdl.add_constraints(P_UR[(t,j)] <= P_RS[t] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식(15)
+    mdl.add_constraints(P_DR[(t,j)] <= P_RS[t] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식(16)
     
     ### Constarints of stored energy of BES - 식(17) ~ 식(19)
+    ## Day-ahead
     ## 식(17) t>=1, j>=2
-    mdl.add_constraints(Energy_BESS[(t,j,s)] == Energy_BESS[(t,j-1,s)] + del_S * (P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] - P_UR_DCH[(t,j,s)])
+    mdl.add_constraints(E_BESS_DA[(t,j,s)] == E_BESS_DA[(t,j-1,s)] + del_S * (P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)])
                        for t in range(1, time_dim+1) for j in range(2, min_dim+1) for s in range(1,BESS_dim+1))
     ## 식(17) + 식(18) t>=2, j=1
-    mdl.add_constraints(Energy_BESS[(t,j,s)] == Energy_BESS[(t-1,min_dim,s)] + del_S * (P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] - P_UR_DCH[(t,j,s)])
+    mdl.add_constraints(E_BESS_DA[(t,j,s)] == E_BESS_DA[(t-1,min_dim,s)] + del_S * (P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)])
                        for t in range(2, time_dim+1) for j in range(1, 2) for s in range(1,BESS_dim+1))
     ## 식(17) + 식(19) t=1, j=1
-    mdl.add_constraints(Energy_BESS[(t,j,s)] == 15 + del_S * (P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] - P_UR_DCH[(t,j,s)])
+    mdl.add_constraints(E_BESS_DA[(t,j,s)] == 15 + del_S * (P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)])
                        for t in range(1, 2) for j in range(1, 2) for s in range(1,BESS_dim+1))
     
     ## 식(19) t=T, j=Nj
-    mdl.add_constraints(Energy_BESS[(t,j,s)] == 15
+    mdl.add_constraints(E_BESS_DA[(t,j,s)] == 15
+                       for t in range(time_dim, time_dim+1) for j in range(min_dim, min_dim+1) for s in range(1,BESS_dim+1))
+    
+    
+    ## Real time
+    ## 식(17) t>=1, j>=2
+    mdl.add_constraints(E_BESS_RT[(t,j,s)] == E_BESS_RT[(t,j-1,s)] + del_S * (P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] - P_UR_DCH[(t,j,s)])
+                       for t in range(1, time_dim+1) for j in range(2, min_dim+1) for s in range(1,BESS_dim+1))
+    ## 식(17) + 식(18) t>=2, j=1
+    mdl.add_constraints(E_BESS_RT[(t,j,s)] == E_BESS_RT[(t-1,min_dim,s)] + del_S * (P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] - P_UR_DCH[(t,j,s)])
+                       for t in range(2, time_dim+1) for j in range(1, 2) for s in range(1,BESS_dim+1))
+    ## 식(17) + 식(19) t=1, j=1
+    mdl.add_constraints(E_BESS_RT[(t,j,s)] == E_BESS_DA[(t,j,s)] + del_S * (P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] - P_UR_DCH[(t,j,s)])
+                       for t in range(1, 2) for j in range(1, 2) for s in range(1,BESS_dim+1))
+    
+    ## 식(19) t=T, j=Nj
+    mdl.add_constraints(E_BESS_RT[(t,j,s)] == E_BESS_DA[(t,j,s)]
                        for t in range(time_dim, time_dim+1) for j in range(min_dim, min_dim+1) for s in range(1,BESS_dim+1))
     
                         
@@ -195,8 +214,11 @@ def build_optimization_model(name='Robust_Optimization_Model'):
                 
                 mdl.add_constraint(P_min_BESS[s-1] * D_Dchar[(t,j,s)] <= P_DA_DCH[(t,j,s)] - P_RS_DCH[(t,j,s)])  # 식(31)
                 
-                mdl.add_constraint(E_min_BESS[s-1] * (D_Char[(t,j,s)] + D_Dchar[(t,j,s)]) <= Energy_BESS[(t,j,s)])  #식(32)
-                mdl.add_constraint(Energy_BESS[(t,j,s)] <= E_max_BESS[s-1] * (D_Char[(t,j,s)] + D_Dchar[(t,j,s)]))  #식(32)
+                mdl.add_constraint(E_min_BESS[s-1] * (D_Char[(t,j,s)] + D_Dchar[(t,j,s)]) <= E_BESS_RT[(t,j,s)])  #식(32) - RT
+                mdl.add_constraint(E_BESS_RT[(t,j,s)] <= E_max_BESS[s-1] * (D_Char[(t,j,s)] + D_Dchar[(t,j,s)]))  #식(32) - RT
+                
+                mdl.add_constraint(E_min_BESS[s-1] * (D_Char[(t,j,s)] + D_Dchar[(t,j,s)]) <= E_BESS_DA[(t,j,s)])  #식(32) - DA
+                mdl.add_constraint(E_BESS_DA[(t,j,s)] <= E_max_BESS[s-1] * (D_Char[(t,j,s)] + D_Dchar[(t,j,s)]))  #식(32) - DA
 
     # Energy capacity in the real-time - 식(32)
     
@@ -381,9 +403,9 @@ def build_optimization_model(name='Robust_Optimization_Model'):
 
     #mdl.add_constraints(P_DR[(t,j)] <= 0.5 * (sum(P_max_BESS)) + 0.5 * 0.5 * (sum(P_max_BESS)) for t in range(1,time_dim+1) for j in range(1,min_dim+1))   # 식 (62) / 변동구간 +-10%
 
-    mdl.add_constraints(1 * Expected_P_RT_WPR.Cells(t+1,j+1).Value <= P_RT_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식 (63) / 변동구간 +-10%
+    mdl.add_constraints(0.5 * Expected_P_RT_WPR.Cells(t+1,j+1).Value <= P_RT_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식 (63) / 변동구간 +-10%
 
-    mdl.add_constraints(P_RT_WPR[(t,j,w)] <= 1 * Expected_P_RT_WPR.Cells(t+1,j+1).Value for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식 (63) / 변동구간 +-10%
+    mdl.add_constraints(P_RT_WPR[(t,j,w)] <= 1.5 * Expected_P_RT_WPR.Cells(t+1,j+1).Value for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식 (63) / 변동구간 +-10%
 
     return mdl
 
@@ -394,6 +416,7 @@ def result_optimization_model(model, DataFrame):
     
     wb_result = excel.Workbooks.Open(os.getcwd()+"\\Result\\robust model_result.xlsx")
     ws1 = wb_result.Worksheets("Optimization Result")
+    ws2 = wb_result.Worksheets("Day-Ahead")
     
     ### Sheet 1  
     # Total Revenue
@@ -402,16 +425,19 @@ def result_optimization_model(model, DataFrame):
     ws1.Cells(2,2).Value = float(mdl.objective_value)
     
     # B_t
-    ws1.Cells(4,1).Value = "Income of owner [$]"
-    ws1.Cells(4,2).Value = frame.loc[frame['var']=="B-t"]['index2'].sum()
+    #ws1.Cells(4,1).Value = "Income of owner [$]"
+    #ws1.Cells(4,2).Value = frame.loc[frame['var']=="B-t"]['index2'].sum()
     
     # C_t
-    ws1.Cells(5,1).Value = "Cost of owner [$]"
-    ws1.Cells(5,2).Value = frame.loc[frame['var']=="C-t"]['index2'].sum()    
+    #ws1.Cells(5,1).Value = "Cost of owner [$]"
+    #ws1.Cells(5,2).Value = frame.loc[frame['var']=="C-t"]['index2'].sum()    
      
     # AV_RO
-    ws1.Cells(6,1).Value = "AV_RO"
-    ws1.Cells(6,2).Value = frame.loc[frame['var']=="AV-RO"]['index3'].sum()
+    ws1.Cells(3,1).Value = "Income in real-time [$]"
+    ws1.Cells(3,2).Value = frame.loc[frame['var']=="AV-RO"]['index2'].sum()
+    
+    ### Sheet 2
+    
           
     print("Optimization Result Calculation Done!")   
     
