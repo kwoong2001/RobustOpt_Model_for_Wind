@@ -6,7 +6,7 @@ import win32com.client as win32
 import pandas as pd
 import os
 
-### 엑셀 불러오기
+### 엑셀 불러오기 23.06.20 버젼
 excel = win32.Dispatch("Excel.Application")
 wb1 = excel.Workbooks.Open(os.getcwd()+"\\Data\\robust model_data.xlsx")
 Price_DA = wb1.Sheets("Price_DA")              # Day-ahead price
