@@ -8,16 +8,12 @@ import os
 
 ### 엑셀 불러오기 23.06.20 버젼
 excel = win32.Dispatch("Excel.Application")
-wb1 = excel.Workbooks.Open(os.getcwd()+"\\Data\\robust model_data.xlsx")
+wb1 = excel.Workbooks.Open(os.getcwd()+"\\Data\\robust model_data_modified.xlsx")
 Price_DA = wb1.Sheets("Price_DA")              # Day-ahead price
 Price_RS = wb1.Sheets("Price_RS")              # Reserve prices
 Price_UR = wb1.Sheets("Price_UR")              # Up regulation prices
 Price_DR = wb1.Sheets("Price_DR")              # Down regulation prices
-#Expected_P_UR = wb1.Sheets("Expected_P_UR")    # Expected deployed power in up regulation services
-#Expected_P_DR = wb1.Sheets("Expected_P_DR")    # Expected deployed power in down regulation services
 Expected_P_RT_WPR = wb1.Sheets("Expected_P_RT_WPR")  # Expected wind power realization
-
-#variation interval은?
 
 ### 파라미터 설정
 time_dim = 24     # 시간 개수 (t)
@@ -35,6 +31,9 @@ E_max_BESS = [30, 30]   # Maximum energy of BESS (MWh)
 P_max_BESS = [5,3]    # Maximum power of BESS (MW)
 P_min_BESS = [0,0]    # Minimum power of BESS (MW)
 Ramp_rate_BESS = [5,3]  # Ramp-rate of BESS
+
+Robust_percent = 0   # Robust percent (0~1)
+contri_reg_percent = 0.2 # Up regulation 혹은 down regulation에 기여하는 비율 (0~1)
 
 ### 최적화 파트
 def build_optimization_model(name='Robust_Optimization_Model'):
@@ -73,8 +72,7 @@ def build_optimization_model(name='Robust_Optimization_Model'):
 
     #Real-time
     P_SP_WPR = mdl.continuous_var_dict(time_n_WPR, lb=0, ub=inf, name="P-SP-WPR")            # Spilled power of WPR (difference between the realization of wind power and the scheduled power of WPR)
-    E_BESS_DA = mdl.continuous_var_dict(time_n_BESS, lb=0, ub=inf, name="E-BESS-DA")        # Energy level of BES
-    E_BESS_RT = mdl.continuous_var_dict(time_n_BESS, lb=0, ub=inf, name="E-BESS-RT")        # Energy level of BES in Real-time
+    E_BESS = mdl.continuous_var_dict(time_n_BESS, lb=0, ub=inf, name="E-BESS")        # Energy level of BES in Real-time
     P_RT_WPR = mdl.continuous_var_dict(time_n_WPR, lb=0, ub=inf, name="P-RT-WPR")                # Realization of wind power in real-time
 
     AV_WPR = mdl.continuous_var_dict(time_n_WPR, lb=0, ub=inf, name="AV-WPR")                    # Auxiliary variables for linearization
@@ -99,8 +97,8 @@ def build_optimization_model(name='Robust_Optimization_Model'):
 
     # Robust Optizimation을 위한 변수 (BESS + WPR) - 식(65)
     #original
-    mdl.add_constraints(AV_RO[t] <= mdl.sum(Price_UR.Cells(t+1,j+1).Value * del_S * (mdl.sum(P_UR_DCH[(t,j,s)] + P_UR_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_UR_WPR[(t,j,w)] for w in range(1,WPR_dim+1))) 
-                                            + Price_DR.Cells(t+1,j+1).Value * del_S * (mdl.sum(P_DR_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_DR_WPR[(t,j,w)] for w in range(1,WPR_dim+1)))
+    mdl.add_constraints(AV_RO[t] <= mdl.sum(Price_UR.Cells(t+1,j+1).Value * del_S * (mdl.sum(P_UR_DCH[(t,j,s)] - P_UR_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_UR_WPR[(t,j,w)] for w in range(1,WPR_dim+1))) 
+                                            + Price_DR.Cells(t+1,j+1).Value * del_S * (mdl.sum(P_DR_CH[(t,j,s)]- P_DR_DCH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_DR_WPR[(t,j,w)] for w in range(1,WPR_dim+1)))
                                             - mdl.sum(Marginal_cost_DCH * del_S * (P_UR_DCH[(t,j,s)] + P_DR_DCH[(t,j,s)])  + Marginal_cost_CH * del_S * (P_UR_CH[(t,j,s)] + P_DR_CH[(t,j,s)])  for s in range(1,BESS_dim+1)) - mdl.sum(Marginal_cost_WPR * del_S * P_UR_WPR[(t,j,w)] for w in range(1,WPR_dim+1)) 
                                             for j in range(1,min_dim+1)) for t in range(1,time_dim+1))
     
@@ -140,42 +138,21 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     
     ### Constarints of stored energy of BES - 식(17) ~ 식(19)
     ## Day-ahead
-    ## 식(17) t>=2,
-    mdl.add_constraints(E_BESS_DA[(t,j,s)] == E_BESS_DA[(t-1,j,s)] + (P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)])
-                       for t in range(2, time_dim+1) for j in range(1, min_dim+1) for s in range(1,BESS_dim+1))
+    ## 식(17) t>=1, j>=2
+    mdl.add_constraints(E_BESS[(t,j,s)] == E_BESS[(t,j-1,s)] + del_S * (P_DA_CH[(t,j,s)] - P_DA_DCH[(t,j,s)] + P_DR_CH[(t,j,s)] + P_UR_CH[(t,j,s)] - P_UR_DCH[(t,j,s)] - P_DR_DCH[(t,j,s)]) 
+                       for t in range(1, time_dim+1) for j in range(2, min_dim+1) for s in range(1,BESS_dim+1))
+    
+    ## 식(19) t>=2, j=1
+    mdl.add_constraints(E_BESS[(t,j,s)] == E_BESS[(t-1,min_dim,s)] 
+                       for t in range(2, time_dim+1) for j in range(1, 2) for s in range(1,BESS_dim+1))
     
     ## 식(19) t=1, j=1
-    mdl.add_constraints(E_BESS_DA[(t,j,s)] == E_max_BESS[s-1]/2 
+    mdl.add_constraints(E_BESS[(t,j,s)] == E_max_BESS[s-1]/2 
                        for t in range(1, 2) for j in range(1, 2) for s in range(1,BESS_dim+1))
     
     ##식(19) t=T, j=Nj
-    mdl.add_constraints(E_BESS_DA[(t,j,s)] == E_max_BESS[s-1]/2 
+    mdl.add_constraints(E_BESS[(t,j,s)] == E_max_BESS[s-1]/2 
                        for t in range(time_dim, time_dim+1) for j in range(min_dim, min_dim+1) for J in range(min_dim, min_dim+1) for s in range(1,BESS_dim+1))
-    
-    ## DA Storage value
-    mdl.add_constraints(E_BESS_DA[(t,j,s)] == E_BESS_DA[(t,J,s)]
-                       for t in range(1, time_dim+1) for j in range(1, min_dim+1) for J in range(1, min_dim+1) for s in range(1,BESS_dim+1))
-    
-    
-    ## Real time
-    ## 식(17) t>=2, j>=2
-    mdl.add_constraints(E_BESS_RT[(t,j,s)] == E_BESS_DA[(t,j,s)] + mdl.sum((del_S * (P_DR_CH[(t,y,s)] + P_UR_CH[(t,y,s)] - P_UR_DCH[(t,y,s)] - P_DR_DCH[(t,y,s)])) for y in range(1,j) )
-                       for t in range(2, time_dim+1) for j in range(2, min_dim+1) for s in range(1,BESS_dim+1))
-    
-    mdl.add_constraints(E_BESS_RT[(t,j,s)] == E_BESS_RT[(t,j-1,s)] + del_S * (P_DR_CH[(t,j,s)] + P_UR_CH[(t,j,s)] - P_UR_DCH[(t,j,s)] - P_DR_DCH[(t,j,s)])
-                       for t in range(2, time_dim+1) for j in range(2, min_dim+1) for s in range(1,BESS_dim+1))
-    
-    ## 식(18) t>=2, j=1
-    mdl.add_constraints(E_BESS_RT[(t,j,s)] == E_BESS_RT[(t-1,min_dim,s)]
-                       for t in range(2, time_dim+1) for j in range(1, 2) for s in range(1,BESS_dim+1))
-    ## 식(19) t=1, j=1
-    mdl.add_constraints(E_BESS_RT[(t,j,s)] == E_BESS_DA[(t,j,s)]
-                       for t in range(1, 2) for j in range(1, 2) for s in range(1,BESS_dim+1))
-    
-    ## 식(19) t=T, j=Nj
-    mdl.add_constraints(E_BESS_RT[(t,j,s)] == E_BESS_DA[(t,j,s)]
-                       for t in range(time_dim, time_dim+1) for j in range(min_dim, min_dim+1) for J in range(min_dim, min_dim+1) for s in range(1,BESS_dim+1))
-    
                         
     ### Constarints of capacity - 식(20) ~ 식(38)
     # Power capacity of BES in day-ahead planning - 식(20) ~ 식(25) + 식(30) ~ 식(31)
@@ -210,42 +187,22 @@ def build_optimization_model(name='Robust_Optimization_Model'):
                 
                 mdl.add_constraint(P_min_BESS[s-1] * D_Dchar[(t,j,s)] <= P_DA_DCH[(t,j,s)] - P_RS_DCH[(t,j,s)])  # 식(31)
                 
-                mdl.add_constraint(E_min_BESS[s-1] <= E_BESS_DA[(t,j,s)])  #식(32) - DA
-                mdl.add_constraint(E_BESS_DA[(t,j,s)] <= E_max_BESS[s-1])  #식(32) - DA
+                mdl.add_constraint(E_min_BESS[s-1] <= E_BESS[(t,j,s)])  #식(32)
+                mdl.add_constraint(E_BESS[(t,j,s)] <= E_max_BESS[s-1])  #식(32)
                 
-                mdl.add_constraint(E_min_BESS[s-1] <= E_BESS_RT[(t,j,s)])  #식(32) - RT
-                mdl.add_constraint(E_BESS_RT[(t,j,s)] <= E_max_BESS[s-1] )  #식(32) - RT
-
     # Energy capacity in the real-time - 식(32)
     
     # Capacity of WPR in the dayahead planning - 식(33) ~ 식(36)
     #식(33)
-    mdl.add_constraints(P_RT_WPR[(t,j,w)] - (1 - D_WPR[(t,j,w)]) * 10000000000 <= P_DA_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(33)
+   
+    mdl.add_constraints(P_DA_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식(33) 
     
-    mdl.add_constraints(P_DA_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)] + (1 - D_WPR[(t,j,w)]) * 10000000000 for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식(33) 
-    
-    mdl.add_constraints(P_DA_WPR[(t,j,w)] <= 10000000000 * D_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식(33) 
-
-    mdl.add_constraints(-1 * 10000000000 * D_WPR[(t,j,w)] <= P_DA_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식(33) 
-
     #식(34)
-    mdl.add_constraints(P_RT_WPR[(t,j,w)] - P_DA_WPR[(t,j,w)] - (1 - D_WPR[(t,j,w)]) * 10000000000 <= P_RS_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(34)
+    mdl.add_constraints(P_RS_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)] - P_DA_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(34)
 
-    mdl.add_constraints(P_RS_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)] - P_DA_WPR[(t,j,w)] + (1 - D_WPR[(t,j,w)]) * 10000000000 for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(34)
-
-    mdl.add_constraints(P_RS_WPR[(t,j,w)] <= 10000000000 * D_WPR[(t,j,w)] - P_DA_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식(34)
-
-    mdl.add_constraints(-1 * 10000000000 * D_WPR[(t,j,w)] - P_DA_WPR[(t,j,w)] <= P_RS_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식(34)
-    
     #식(35)
-    mdl.add_constraints(P_DA_WPR[(t,j,w)] + P_RS_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)] + (1 - D_WPR[(t,j,w)]) * 10000000000 for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(35)
+    mdl.add_constraints(P_DA_WPR[(t,j,w)] + P_RS_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(35)
     
-    mdl.add_constraints(P_DA_WPR[(t,j,w)] + P_RS_WPR[(t,j,w)] >= P_RT_WPR[(t,j,w)] - (1 - D_WPR[(t,j,w)]) * 10000000000 for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(35)
-    
-    mdl.add_constraints(P_DA_WPR[(t,j,w)] + P_RS_WPR[(t,j,w)] <= 10000000000 * D_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(35)    
-    
-    mdl.add_constraints(P_DA_WPR[(t,j,w)] + P_RS_WPR[(t,j,w)] >= (-1) * 10000000000 * D_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(35)    
-
     #식(36)
     mdl.add_constraints(0 <= P_DA_WPR[(t,j,w)] - P_RS_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(36)
 
@@ -297,7 +254,7 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     mdl.add_constraints(-1 * Ramp_rate_BESS[s-1] <= P_DA_DCH[(t,j,s)] for t in range(1,2) for j in range(1,2) for s in range(1,BESS_dim+1))
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= P_DA_DCH[(t,j,s)] for t in range(1,2) for j in range(1,2) for s in range(1,BESS_dim+1))
     
-    ##식(45) and 식(55)
+    ##식(45) and 식(55), 논문이 맞음, 예비력은 사용되지 않았기 때문에 차이로 Ramp rate를 계산할 수 없음
     #t>=1 and j>=2, 
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= P_RS_CH[(t,j,s)] + P_RS_CH[(t,j-1,s)] for t in range(1,time_dim+1) for j in range(2,min_dim+1) for s in range(1,BESS_dim+1))
     
@@ -352,11 +309,11 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     mdl.add_constraints(-1 * Ramp_rate_WPR  <= P_DA_WPR[(t,j,w)] - P_DA_WPR[(t-1,min_dim,w)] for t in range(2,time_dim+1) for j in range(1,2) for w in range(1,WPR_dim+1))
     mdl.add_constraints( Ramp_rate_WPR >= P_DA_WPR[(t,j,w)] - P_DA_WPR[(t-1,min_dim,w)] for t in range(2,time_dim+1) for j in range(1,2) for w in range(1,WPR_dim+1))
     
-    #t=1 and j=1 , 식 논문과 틀림
+    #t=1 and j=1 , 
     mdl.add_constraints(-1 * Ramp_rate_WPR <= P_DA_WPR[(t,j,w)] for t in range(1,2) for j in range(1,2) for w in range(1,WPR_dim+1))
     mdl.add_constraints( Ramp_rate_WPR >= P_DA_WPR[(t,j,w)] for t in range(1,2) for j in range(1,2) for w in range(1,WPR_dim+1))
     
-    ##식(50) and 식(57)
+    ##식(50) and 식(57), 논문이 맞음, 예비력은 사용되지 않았기 때문에 차이로 Ramp rate를 계산할 수 없음
     #t>=1, j>=2, 
     mdl.add_constraints( Ramp_rate_WPR >= P_RS_WPR[(t,j,w)] + P_RS_WPR[(t,j-1,w)] for t in range(1,time_dim+1) for j in range(2,min_dim+1) for w in range(1,WPR_dim+1))
     
@@ -375,33 +332,32 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     mdl.add_constraints(-1 * Ramp_rate_WPR <= (P_DA_WPR[(t,j,w)] - P_DA_WPR[(t-1,min_dim,w)] ) + (P_RS_WPR[(t,j,w)] + P_RS_WPR[(t-1,min_dim,w)]) for t in range(2,time_dim+1) for j in range(1,2) for w in range(1,WPR_dim+1))
     mdl.add_constraints( Ramp_rate_WPR >= (P_DA_WPR[(t,j,w)] - P_DA_WPR[(t-1,min_dim,w)]) + (P_RS_WPR[(t,j,w)] + P_RS_WPR[(t-1,min_dim,w)]) for t in range(2,time_dim+1) for j in range(1,2) for w in range(1,WPR_dim+1))
     
-    #t=1 and j=1 , 식 논문과 틀림
+    #t=1 and j=1 ,
     mdl.add_constraints(-1 * Ramp_rate_WPR <= (P_DA_WPR[(t,j,w)] + P_RS_WPR[(t,j,w)]) for t in range(1,2) for j in range(1,2) for w in range(1,WPR_dim+1))
     mdl.add_constraints( Ramp_rate_WPR >= (P_DA_WPR[(t,j,w)] + P_RS_WPR[(t,j,w)]) for t in range(1,2) for j in range(1,2) for w in range(1,WPR_dim+1))
        
     ### Constarints of spillage power - 식(58) ~ 식(59)
-    ##식(58), 논문과 다름
-    mdl.add_constraints(P_SP_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)] - (P_DA_WPR[(t,j,w)] + P_UR_WPR[(t,j,w)] - P_DR_WPR[(t,j,w)]) 
+    ##식(58)
+    mdl.add_constraints(P_SP_WPR[(t,j,w)] == P_RT_WPR[(t,j,w)] - (P_DA_WPR[(t,j,w)] + P_UR_WPR[(t,j,w)] - P_DR_WPR[(t,j,w)]) 
                         for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))
     
-    ## 식(59) and appendix
-    mdl.add_constraints(P_SP_WPR[(t,j,w)] <= AV_WPR[(t,j,w)]  for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))
-    mdl.add_constraints(AV_WPR[(t,j,w)] <= D_WPR[(t,j,w)] * 10000000000  for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))   
-    mdl.add_constraints(AV_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)]  for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))
-    mdl.add_constraints(AV_WPR[(t,j,w)] >= P_RT_WPR[(t,j,w)] - 10000000000*(1-D_WPR[(t,j,w)])  for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))
+    ##식(59)
+    mdl.add_constraints(P_SP_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)] 
+                        for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))
+
                         
-    ### Constraints of uncertain parameters-  식(61) ~ 식(63)
-    mdl.add_constraints(0.8 * P_UR[(t,j)] <= P_UR[(t,j)] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식 (61) / 변동구간 +-10%
+    ### Constraints of uncertain parameters-  식(61) ~ 식(63), 논문과 다름
+    mdl.add_constraints((1-Robust_percent) * contri_reg_percent * (mdl.sum(Expected_P_RT_WPR.Cells(t+1,j+1).Value * D_WPR[(t,j,w)] for w in range(1,WPR_dim+1))+ mdl.sum(P_max_BESS[s-1] for s in range(1,BESS_dim+1))) <= P_UR[(t,j)] for s in range(1, BESS_dim+1) for t in range(1,time_dim+1) for j in range(1,min_dim+1))
 
-    mdl.add_constraints(1.2 * P_UR[(t,j)] >= P_UR[(t,j)] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식 (61) / 변동구간 +-10%
+    mdl.add_constraints((1+Robust_percent) * contri_reg_percent * (mdl.sum(Expected_P_RT_WPR.Cells(t+1,j+1).Value * D_WPR[(t,j,w)] for w in range(1,WPR_dim+1))+ mdl.sum(P_max_BESS[s-1] for s in range(1,BESS_dim+1))) >= P_UR[(t,j)] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식 (61) / 변동구간 +-10%
 
-    mdl.add_constraints(0.8 * P_DR[(t,j)] <= P_DR[(t,j)] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식 (61) / 변동구간 +-10%
+    mdl.add_constraints((1-Robust_percent) * contri_reg_percent * (mdl.sum(Expected_P_RT_WPR.Cells(t+1,j+1).Value * D_WPR[(t,j,w)] for w in range(1,WPR_dim+1))+ mdl.sum(P_max_BESS[s-1] for s in range(1,BESS_dim+1))) <= P_DR[(t,j)] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식 (61) / 변동구간 +-10%
 
-    mdl.add_constraints(1.2 * P_DR[(t,j)] >= P_DR[(t,j)] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식 (61) / 변동구간 +-10%
+    mdl.add_constraints((1+Robust_percent) * contri_reg_percent * (mdl.sum(Expected_P_RT_WPR.Cells(t+1,j+1).Value * D_WPR[(t,j,w)] for w in range(1,WPR_dim+1))+ mdl.sum(P_max_BESS[s-1] for s in range(1,BESS_dim+1))) >= P_DR[(t,j)] for t in range(1,time_dim+1) for j in range(1,min_dim+1))  # 식 (61) / 변동구간 +-10%
 
-    mdl.add_constraints(0.8 * Expected_P_RT_WPR.Cells(t+1,j+1).Value <= P_RT_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식 (63) / 변동구간 +-10%
+    mdl.add_constraints((1-Robust_percent) * Expected_P_RT_WPR.Cells(t+1,j+1).Value * D_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식 (63) / 변동구간 +-10%
 
-    mdl.add_constraints(P_RT_WPR[(t,j,w)] <= 1.2 * Expected_P_RT_WPR.Cells(t+1,j+1).Value for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식 (63) / 변동구간 +-10%
+    mdl.add_constraints(P_RT_WPR[(t,j,w)] <= (1+Robust_percent) * Expected_P_RT_WPR.Cells(t+1,j+1).Value * D_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식 (63) / 변동구간 +-10%
 
     return mdl
 
