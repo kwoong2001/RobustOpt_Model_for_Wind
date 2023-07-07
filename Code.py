@@ -1,3 +1,10 @@
+# 23.07.07~
+# 변경 프로젝트
+#   - DA->DA
+#   - RS->DA_RS
+#   - UR->RT_UR_imbalance (RT-LMP) 
+#   - DR->RT_DR_imbalance (RT-LMP) 
+
 from __future__ import print_function
 from cmath import inf
 from docplex.mp.model import Model
@@ -6,7 +13,6 @@ import win32com.client as win32
 import pandas as pd
 import os
 
-### 엑셀 불러오기 23.06.20 버젼
 excel = win32.Dispatch("Excel.Application")
 wb1 = excel.Workbooks.Open(os.getcwd()+"\\Data\\robust model_data_modified.xlsx")
 Price_DA = wb1.Sheets("Price_DA")              # Day-ahead price
