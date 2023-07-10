@@ -27,19 +27,18 @@ min_dim = 12      # ex) 5분 x 12 = 1시간 (j)
 del_S = 1/min_dim # Duration of intra-hourly interval ex) 5min = 1/12(h)
 BESS_dim = 2      # BESS 개수 (s)
 WPR_dim = 1       # 풍력발전기 개수 (w)
-Marginal_cost_CH = 1    # Marginal cost of BES in charging modes
-Marginal_cost_DCH = 1   # Marginal cost of BES in discharging modes
-Marginal_cost_WPR = 3   # Marginal cost of WPR
+Marginal_cost_CH = [1,0.8]    # Marginal cost of BES in charging modes
+Marginal_cost_DCH = [1,0.8]   # Marginal cost of BES in discharging modes
+Marginal_cost_WPR = [3]   # Marginal cost of WPR
 Ramp_rate_WPR = 3       # Ramp-rate of WPR (MW)
-Initial_BESS = 15   # Initial energy of BESS (MWh)
-E_min_BESS = [0, 0]    # Minimum energy of BESS (MWh)
-E_max_BESS = [30, 30]   # Maximum energy of BESS (MWh)
+E_min_BESS = [0,0]    # Minimum energy of BESS (MWh)
+E_max_BESS = [30,18]   # Maximum energy of BESS (MWh)
 P_max_BESS = [5,3]    # Maximum power of BESS (MW)
 P_min_BESS = [0,0]    # Minimum power of BESS (MW)
 Ramp_rate_BESS = [5,3]  # Ramp-rate of BESS
 
-Robust_percent = 0   # Robust percent (0~1)
-contri_reg_percent = 0.2 # Up regulation 혹은 down regulation에 기여하는 비율 (0~1)
+Robust_percent = 0.5   # Robust percent (0~1)
+contri_reg_percent = 0.5 # Up regulation 혹은 down regulation에 기여하는 비율 (0~1)
 
 ### 최적화 파트
 def build_optimization_model(name='Robust_Optimization_Model'):
@@ -98,14 +97,15 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     
     mdl.maximize(mdl.sum(Price_DA.Cells(t+1,2).Value * mdl.sum(del_S * (mdl.sum(P_DA_DCH[(t,j,s)] - P_DA_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_DA_WPR[(t,j,w)] for w in range(1,WPR_dim+1))) for j in range(1,min_dim+1))
                          + Price_RS.Cells(t+1,2).Value * mdl.sum(del_S * ((mdl.sum(P_RS_CH[(t,j,s)] + P_RS_DCH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_RS_WPR[(t,j,w)] for w in range(1,WPR_dim+1)))) for j in range(1,min_dim+1))
-                         - mdl.sum((mdl.sum(Marginal_cost_DCH * del_S * P_DA_DCH[(t,j,s)] + Marginal_cost_CH * del_S * P_DA_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(Marginal_cost_WPR * del_S * P_DA_WPR[(t,j,w)] for w in range(1,WPR_dim+1))) for j in range(1,min_dim+1))
+                         - mdl.sum((mdl.sum(Marginal_cost_DCH[s-1] * del_S * P_DA_DCH[(t,j,s)] + Marginal_cost_CH[s-1] * del_S * P_DA_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(Marginal_cost_WPR[w-1] * del_S * P_DA_WPR[(t,j,w)] for w in range(1,WPR_dim+1))) for j in range(1,min_dim+1))
                          + AV_RO[t] for t in range(1,time_dim+1)))
 
     # Robust Optizimation을 위한 변수 (BESS + WPR) - 식(65)
     #original
     mdl.add_constraints(AV_RO[t] <= mdl.sum(Price_UR.Cells(t+1,j+1).Value * del_S * (mdl.sum(P_UR_DCH[(t,j,s)] - P_UR_CH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_UR_WPR[(t,j,w)] for w in range(1,WPR_dim+1))) 
                                             + Price_DR.Cells(t+1,j+1).Value * del_S * (mdl.sum(P_DR_CH[(t,j,s)]- P_DR_DCH[(t,j,s)] for s in range(1,BESS_dim+1)) + mdl.sum(P_DR_WPR[(t,j,w)] for w in range(1,WPR_dim+1)))
-                                            - mdl.sum(Marginal_cost_DCH * del_S * (P_UR_DCH[(t,j,s)] + P_DR_DCH[(t,j,s)])  + Marginal_cost_CH * del_S * (P_UR_CH[(t,j,s)] + P_DR_CH[(t,j,s)])  for s in range(1,BESS_dim+1)) - mdl.sum(Marginal_cost_WPR * del_S * P_UR_WPR[(t,j,w)] for w in range(1,WPR_dim+1)) 
+                                            - mdl.sum(Marginal_cost_DCH[s-1] * del_S * (P_UR_DCH[(t,j,s)] + P_DR_DCH[(t,j,s)])  + Marginal_cost_CH[s-1] * del_S * (P_UR_CH[(t,j,s)] + P_DR_CH[(t,j,s)])  for s in range(1,BESS_dim+1)) - mdl.sum(Marginal_cost_WPR[w-1] * del_S * P_UR_WPR[(t,j,w)] for w in range(1,WPR_dim+1))
+                                            - mdl.sum(Price_DR.Cells(t+1,j+1).Value * del_S * P_SP_WPR[(t,j,w)] for w in range(1,WPR_dim+1)) 
                                             for j in range(1,min_dim+1)) for t in range(1,time_dim+1))
     
     ### Equality constraints - 식(4) ~ 식(6) + 식(12) ~ 식(14)
@@ -201,7 +201,7 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     # Capacity of WPR in the dayahead planning - 식(33) ~ 식(36)
     #식(33)
    
-    mdl.add_constraints(P_DA_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식(33) 
+    mdl.add_constraints(P_DA_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)]  for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))  # 식(33) 
     
     #식(34)
     mdl.add_constraints(P_RS_WPR[(t,j,w)] <= P_RT_WPR[(t,j,w)] - P_DA_WPR[(t,j,w)] for t in range(1,time_dim+1) for j in range(1,min_dim+1) for w in range(1,WPR_dim+1))   # 식(34)
@@ -235,7 +235,7 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     
     ### Constarints of ramp-rate - 식(43) ~ 식(57)
     ##식(43) and 식(53)
-    #t>=1, j>=2
+    #t>=1, j>=2 - 필요없음, 같은 t에서 j에 관계없이 일정한 값을 가짐
     mdl.add_constraints(-1 * Ramp_rate_BESS[s-1] <= P_DA_CH[(t,j,s)] - P_DA_CH[(t,j-1,s)] for t in range(1,time_dim+1) for j in range(2,min_dim+1) for s in range(1,BESS_dim+1))
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= P_DA_CH[(t,j,s)] - P_DA_CH[(t,j-1,s)] for t in range(1,time_dim+1) for j in range(2,min_dim+1) for s in range(1,BESS_dim+1))
     
@@ -243,12 +243,12 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     mdl.add_constraints(-1 * Ramp_rate_BESS[s-1] <= P_DA_CH[(t,j,s)] - P_DA_CH[(t-1,min_dim,s)] for t in range(2,time_dim+1) for j in range(1,2) for s in range(1,BESS_dim+1))
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= P_DA_CH[(t,j,s)] - P_DA_CH[(t-1,min_dim,s)] for t in range(2,time_dim+1) for j in range(1,2) for s in range(1,BESS_dim+1))
     
-    #t=1 and j=1 
+    #t=1 and j=1  - 필요없음, 같은 t에서 j에 관계없이 일정한 값을 가짐
     mdl.add_constraints(-1 * Ramp_rate_BESS[s-1] <= P_DA_CH[(t,j,s)] for t in range(1,2) for j in range(1,2) for s in range(1,BESS_dim+1))
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= P_DA_CH[(t,j,s)] for t in range(1,2) for j in range(1,2) for s in range(1,BESS_dim+1))
     
     ##식(44) and 식(52)
-    #t>=1 and j>=2
+    #t>=1 and j>=2 - 필요없음, 같은 t에서 j에 관계없이 일정한 값을 가짐
     mdl.add_constraints(-1 * Ramp_rate_BESS[s-1] <= P_DA_DCH[(t,j,s)] - P_DA_DCH[(t,j-1,s)] for t in range(1,time_dim+1) for j in range(2,min_dim+1) for s in range(1,BESS_dim+1))
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= P_DA_DCH[(t,j,s)] - P_DA_DCH[(t,j-1,s)] for t in range(1,time_dim+1) for j in range(2,min_dim+1) for s in range(1,BESS_dim+1))
     
@@ -256,18 +256,18 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     mdl.add_constraints(-1 * Ramp_rate_BESS[s-1] <= P_DA_DCH[(t,j,s)] - P_DA_DCH[(t-1,min_dim,s)] for t in range(2,time_dim+1) for j in range(1,2) for s in range(1,BESS_dim+1))
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= P_DA_DCH[(t,j,s)] - P_DA_DCH[(t-1,min_dim,s)] for t in range(2,time_dim+1) for j in range(1,2) for s in range(1,BESS_dim+1))
     
-    #t=1 and j=1 , 
+    #t=1 and j=1 ,  - 필요없음, 같은 t에서 j에 관계없이 일정한 값을 가짐
     mdl.add_constraints(-1 * Ramp_rate_BESS[s-1] <= P_DA_DCH[(t,j,s)] for t in range(1,2) for j in range(1,2) for s in range(1,BESS_dim+1))
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= P_DA_DCH[(t,j,s)] for t in range(1,2) for j in range(1,2) for s in range(1,BESS_dim+1))
     
     ##식(45) and 식(55), 논문이 맞음, 예비력은 사용되지 않았기 때문에 차이로 Ramp rate를 계산할 수 없음
-    #t>=1 and j>=2, 
+    #t>=1 and j>=2,
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= P_RS_CH[(t,j,s)] + P_RS_CH[(t,j-1,s)] for t in range(1,time_dim+1) for j in range(2,min_dim+1) for s in range(1,BESS_dim+1))
     
     #t>=2 and j=1 , 
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= P_RS_CH[(t,j,s)] + P_RS_CH[(t-1,min_dim,s)] for t in range(2,time_dim+1) for j in range(1,2) for s in range(1,BESS_dim+1))
     
-    #t=1 and j=1 , 
+    #t=1 and j=1 ,
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= P_RS_CH[(t,j,s)] for t in range(1,2) for j in range(1,2) for s in range(1,BESS_dim+1))
     
     ##식(46) and 식(56)
@@ -281,7 +281,7 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= P_RS_DCH[(t,j,s)] for t in range(1,2) for j in range(1,2) for s in range(1,BESS_dim+1))
     
     ##식(47)
-    #t>=1, j>=2, 
+    #t>=1, j>=2,   - 필요없음, 같은 t에서 j에 관계없이 일정한 값을 가짐
     mdl.add_constraints(-1 * Ramp_rate_BESS[s-1] <= (P_DA_CH[(t,j,s)] - P_DA_CH[(t,j-1,s)]) + ( P_RS_CH[(t,j,s)] + P_RS_CH[(t,j-1,s)]) for t in range(1,time_dim+1) for j in range(2,min_dim+1) for s in range(1,BESS_dim+1))
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= (P_DA_CH[(t,j,s)] - P_DA_CH[(t,j-1,s)]) + (P_RS_CH[(t,j,s)] + P_RS_CH[(t,j-1,s)]) for t in range(1,time_dim+1) for j in range(2,min_dim+1) for s in range(1,BESS_dim+1))
     
@@ -294,7 +294,7 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= (P_DA_CH[(t,j,s)] + P_RS_CH[(t,j,s)]) for t in range(1,2) for j in range(1,2) for s in range(1,BESS_dim+1))
     
     ##식(48)
-    #t>=1, j>=2, 
+    #t>=1, j>=2,   - 필요없음, 같은 t에서 j에 관계없이 일정한 값을 가짐
     mdl.add_constraints(-1 * Ramp_rate_BESS[s-1] <= (P_DA_DCH[(t,j,s)] - P_DA_DCH[(t,j-1,s)] ) + (P_RS_DCH[(t,j,s)] + P_RS_DCH[(t,j-1,s)]) for t in range(1,time_dim+1) for j in range(2,min_dim+1) for s in range(1,BESS_dim+1))
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= (P_DA_DCH[(t,j,s)] - P_DA_DCH[(t,j-1,s)] ) + (P_RS_DCH[(t,j,s)] + P_RS_DCH[(t,j-1,s)]) for t in range(1,time_dim+1) for j in range(2,min_dim+1) for s in range(1,BESS_dim+1))
     
@@ -307,7 +307,7 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     mdl.add_constraints( Ramp_rate_BESS[s-1] >= (P_DA_DCH[(t,j,s)] + P_RS_DCH[(t,j,s)]) for t in range(1,2) for j in range(1,2) for s in range(1,BESS_dim+1))
     
     ##식(49) and 식(54)
-    #t>=1, j>=2,
+    #t>=1, j>=2,   - 필요없음, 같은 t에서 j에 관계없이 일정한 값을 가짐
     mdl.add_constraints(-1 * Ramp_rate_WPR  <= P_DA_WPR[(t,j,w)] - P_DA_WPR[(t,j-1,w)] for t in range(1,time_dim+1) for j in range(2,min_dim+1) for w in range(1,WPR_dim+1))
     mdl.add_constraints( Ramp_rate_WPR >= P_DA_WPR[(t,j,w)] - P_DA_WPR[(t,j-1,w)] for t in range(1,time_dim+1) for j in range(2,min_dim+1) for w in range(1,WPR_dim+1))
     
@@ -330,7 +330,7 @@ def build_optimization_model(name='Robust_Optimization_Model'):
     mdl.add_constraints( Ramp_rate_WPR >= P_RS_WPR[(t,j,w)] for t in range(1,2) for j in range(1,2) for w in range(1,WPR_dim+1))
     
     ##식(51)
-    #t>=1, j>=2, 
+    #t>=1, j>=2,   - 필요없음, 같은 t에서 j에 관계없이 일정한 값을 가짐
     mdl.add_constraints(-1 * Ramp_rate_WPR<= (P_DA_WPR[(t,j,w)] - P_DA_WPR[(t,j-1,w)]) + (P_RS_WPR[(t,j,w)] + P_RS_WPR[(t,j-1,w)]) for t in range(1,time_dim+1) for j in range(2,min_dim+1) for w in range(1,WPR_dim+1))
     mdl.add_constraints( Ramp_rate_WPR >= (P_DA_WPR[(t,j,w)] - P_DA_WPR[(t,j-1,w)]) + ( P_RS_WPR[(t,j,w)] + P_RS_WPR[(t,j-1,w)]) for t in range(1,time_dim+1) for j in range(2,min_dim+1) for w in range(1,WPR_dim+1))
     
@@ -381,18 +381,108 @@ def result_optimization_model(model, DataFrame):
     ws1.Cells(1,2).Value = "Optimization Result"
     ws1.Cells(2,1).Value = "Total Revenue [$]"
     ws1.Cells(2,2).Value = float(mdl.objective_value)
-    
-    # B_t
-    #ws1.Cells(4,1).Value = "Income of owner [$]"
-    #ws1.Cells(4,2).Value = frame.loc[frame['var']=="B-t"]['index2'].sum()
-    
-    # C_t
-    #ws1.Cells(5,1).Value = "Cost of owner [$]"
-    #ws1.Cells(5,2).Value = frame.loc[frame['var']=="C-t"]['index2'].sum()    
-     
+       
     # AV_RO
     ws1.Cells(3,1).Value = "Income in real-time [$]"
     ws1.Cells(3,2).Value = frame.loc[frame['var']=="AV-RO"]['index2'].sum()
+    
+    ### Case Result
+    ws1.Cells(7,1).Value = "Contribution"
+    
+    ## Day-ahead Result
+    ws1.Cells(5,2).Value = "Day-head"
+    
+    #Result for BESS
+    for s in range(1, BESS_dim+1):
+        if s == 1:
+            BESS_DA_DCH_cost_result = []
+            BESS_DA_CH_cost_result = []
+            BESS_DA_DCH_price_result = []
+            BESS_DA_CH_price_result = []
+            BESS_DA_RS_price_result=[]
+            
+        BESS_DA_DCH_cost_result.append(0)
+        BESS_DA_CH_cost_result.append(0)
+        BESS_DA_DCH_price_result.append(0)
+        BESS_DA_CH_price_result.append(0)
+        BESS_DA_RS_price_result.append(0)
+        for t in range(1, time_dim+1):
+            for j in range(1, min_dim+1):
+                BESS_DA_DCH_cost_result[s-1] += del_S * Marginal_cost_DCH[s-1] * frame.loc[frame['var']=="P-DA-DCH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum()
+                BESS_DA_CH_cost_result[s-1] += del_S * Marginal_cost_CH[s-1] * frame.loc[frame['var']=="P-DA-CH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum()
+                    
+                BESS_DA_DCH_price_result[s-1] += del_S * Price_DA.Cells(t+1,2).Value * frame.loc[frame['var']=="P-DA-DCH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum()
+                BESS_DA_CH_price_result[s-1] += del_S * Price_DA.Cells(t+1,2).Value * frame.loc[frame['var']=="P-DA-CH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum()
+                
+                BESS_DA_RS_price_result[s-1] += del_S * Price_RS.Cells(t+1,2).Value * (frame.loc[frame['var']=="P-RS-CH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum()
+                                                                                       +frame.loc[frame['var']=="P-RS-DCH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum())
+                    
+        ws1.Cells(6,2+s-1).Value = "BESS#"+str(s)
+        ws1.Cells(7,2+s-1).Value = BESS_DA_RS_price_result[s-1]+(BESS_DA_DCH_price_result[s-1]-BESS_DA_CH_price_result[s-1])-(BESS_DA_DCH_cost_result[s-1] + BESS_DA_CH_cost_result[s-1])
+        
+    #Result for Wind
+    for w in range(1, WPR_dim+1):
+        if w == 1:
+            Wind_DA_cost_result = []
+            Wind_DA_price_result = []
+            Wind_DA_RS_price_result=[]
+        Wind_DA_cost_result.append(0)
+        Wind_DA_price_result.append(0)
+        Wind_DA_RS_price_result.append(0)
+        for t in range(1, time_dim+1):
+            for j in range(1, min_dim+1):
+                Wind_DA_cost_result[w-1] += del_S * Marginal_cost_WPR[w-1] * frame.loc[frame['var']=="P-DA-WPR"]['value'][min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w-1:min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w].sum()
+                Wind_DA_price_result[w-1] += del_S * Price_DA.Cells(t+1,2).Value * frame.loc[frame['var']=="P-DA-WPR"]['value'][min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w-1:min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w].sum()
+                Wind_DA_RS_price_result[w-1] += del_S * Price_RS.Cells(t+1,2).Value * frame.loc[frame['var']=="P-RS-WPR"]['value'][min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w-1:min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w].sum()
+                    
+        ws1.Cells(6,2+BESS_dim+w-1).Value = "Wind#"+str(w)
+        ws1.Cells(7,2+BESS_dim+w-1).Value = Wind_DA_RS_price_result[w-1]+Wind_DA_price_result[w-1]-Wind_DA_cost_result[w-1]
+    
+    ## Real-time Result
+    ws1.Cells(5,2+BESS_dim+WPR_dim).Value = "Real-time"
+    #Result for BESS
+    for s in range(1, BESS_dim+1):
+        if s == 1:
+            BESS_RT_DCH_cost_result = []
+            BESS_RT_CH_cost_result = []
+            BESS_RT_DCH_price_result = []
+            BESS_RT_CH_price_result = []
+        BESS_RT_DCH_cost_result.append(0)
+        BESS_RT_CH_cost_result.append(0)
+        BESS_RT_DCH_price_result.append(0)
+        BESS_RT_CH_price_result.append(0)
+        for t in range(1, time_dim+1):
+            for j in range(1, min_dim+1):
+                
+                BESS_RT_DCH_cost_result[s-1] += del_S * Marginal_cost_DCH[s-1] * (frame.loc[frame['var']=="P-UR-DCH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum()
+                                                                          + frame.loc[frame['var']=="P-DR-DCH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum()) 
+                BESS_RT_CH_cost_result[s-1] += del_S * Marginal_cost_CH[s-1] * (frame.loc[frame['var']=="P-UR-CH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum()
+                                                                        +frame.loc[frame['var']=="P-DR-CH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum())
+                    
+                BESS_RT_DCH_price_result[s-1] += (Price_UR.Cells(t+1,j+1).Value * del_S * frame.loc[frame['var']=="P-UR-DCH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum()
+                                                    - Price_DR.Cells(t+1,j+1).Value * del_S * frame.loc[frame['var']=="P-DR-DCH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum())
+                BESS_RT_CH_price_result[s-1] += (Price_UR.Cells(t+1,j+1).Value * del_S * frame.loc[frame['var']=="P-UR-CH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum()
+                                                    - Price_DR.Cells(t+1,j+1).Value * del_S * frame.loc[frame['var']=="P-DR-CH"]['value'][min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s-1:min_dim*BESS_dim*(t-1)+BESS_dim*(j-1)+s].sum())
+                    
+        ws1.Cells(6,2+BESS_dim+WPR_dim+s-1).Value = "BESS#"+str(s)
+        ws1.Cells(7,2+BESS_dim+WPR_dim+s-1).Value = (BESS_RT_DCH_price_result[s-1]-BESS_RT_CH_price_result[s-1])-(BESS_RT_DCH_cost_result[s-1] + BESS_RT_CH_cost_result[s-1])
+        
+    #Result for Wind
+    for w in range(1, WPR_dim+1):
+        if w == 1:
+            Wind_RT_cost_result = []
+            Wind_RT_price_result = []
+        Wind_RT_cost_result.append(0)
+        Wind_RT_price_result.append(0)
+        for t in range(1, time_dim+1):
+            for j in range(1, min_dim+1):
+                Wind_RT_cost_result[w-1] += del_S * Marginal_cost_WPR[w-1] * frame.loc[frame['var']=="P-UR-WPR"]['value'][min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w-1:min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w].sum()
+                Wind_RT_price_result[w-1] += (Price_UR.Cells(t+1,j+1).Value * del_S * frame.loc[frame['var']=="P-UR-WPR"]['value'][min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w-1:min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w].sum()
+                                                +Price_DR.Cells(t+1,j+1).Value * del_S * frame.loc[frame['var']=="P-DR-WPR"]['value'][min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w-1:min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w].sum()
+                                                -Price_DR.Cells(t+1,j+1).Value * del_S * frame.loc[frame['var']=="P-SP-WPR"]['value'][min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w-1:min_dim*WPR_dim*(t-1)+WPR_dim*(j-1)+w].sum())
+                    
+        ws1.Cells(6,2+BESS_dim+WPR_dim+BESS_dim+w-1).Value = "Wind#"+str(w)
+        ws1.Cells(7,2+BESS_dim+WPR_dim+BESS_dim+w-1).Value = Wind_RT_price_result[w-1]-Wind_RT_cost_result[w-1]    
     
     ### Sheet 2
     
